@@ -1,16 +1,16 @@
 """Main PhoneAgent class for orchestrating phone automation."""
 
-import json
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from phone_agent.actions import ActionHandler
-from phone_agent.actions.handler import do, finish, parse_action
+from phone_agent.actions.handler import finish
 from phone_agent.config import get_messages, get_system_prompt
 from phone_agent.device_factory import get_device_factory
 from phone_agent.model import ModelClient, ModelConfig
-from phone_agent.model.client import MessageBuilder
+from phone_agent.planner import ActionParser, ModelPlanner
 
 
 @dataclass
@@ -37,6 +37,13 @@ class StepResult:
     action: dict[str, Any] | None
     thinking: str
     message: str | None = None
+    screenshot_base64: str | None = None
+    screenshot_width: int | None = None
+    screenshot_height: int | None = None
+    screenshot_is_sensitive: bool = False
+    current_app: str | None = None
+    model_output: str | None = None
+    duration_ms: int | None = None
 
 
 class PhoneAgent:
@@ -78,7 +85,19 @@ class PhoneAgent:
             takeover_callback=takeover_callback,
         )
 
-        self._context: list[dict[str, Any]] = []
+        # Prompt/model concern lives on the planner; parse on the parser. Both
+        # are faithful extractions from the old _execute_step and will become the
+        # trunk for OpenAutoGLMAdapter (Gate B, next step).
+        self.planner = ModelPlanner(
+            model_client=self.model_client,
+            system_prompt=self.agent_config.system_prompt,
+            lang=self.agent_config.lang,
+            verbose=self.agent_config.verbose,
+        )
+        self.parser = ActionParser(
+            verbose=self.agent_config.verbose, lang=self.agent_config.lang
+        )
+
         self._step_count = 0
 
     def run(self, task: str) -> str:
@@ -91,7 +110,7 @@ class PhoneAgent:
         Returns:
             Final message from the agent.
         """
-        self._context = []
+        self.planner.reset()
         self._step_count = 0
 
         # First step with user prompt
@@ -121,7 +140,7 @@ class PhoneAgent:
         Returns:
             StepResult with step details.
         """
-        is_first = len(self._context) == 0
+        is_first = self.planner.context_len() == 0
 
         if is_first and not task:
             raise ValueError("Task is required for the first step")
@@ -130,51 +149,36 @@ class PhoneAgent:
 
     def reset(self) -> None:
         """Reset the agent state for a new task."""
-        self._context = []
+        self.planner.reset()
         self._step_count = 0
 
     def _execute_step(
         self, user_prompt: str | None = None, is_first: bool = False
     ) -> StepResult:
-        """Execute a single step of the agent loop."""
+        """Execute a single step of the agent loop.
+
+        Step order is locked (Gate B extraction contract):
+        observe -> planner.plan -> parser.parse -> planner.strip_last_image
+        -> action_handler.execute -> planner.append_assistant -> finished.
+        """
+        step_started_at = time.perf_counter()
         self._step_count += 1
 
-        # Capture current screen state
+        # Capture current screen state (observation — stays on the agent for now;
+        # moves to EnvBackend in a later Gate-B step).
         device_factory = get_device_factory()
         screenshot = device_factory.get_screenshot(self.agent_config.device_id)
         current_app = device_factory.get_current_app(self.agent_config.device_id)
 
-        # Build messages
-        if is_first:
-            self._context.append(
-                MessageBuilder.create_system_message(self.agent_config.system_prompt)
-            )
-
-            screen_info = MessageBuilder.build_screen_info(current_app)
-            text_content = f"{user_prompt}\n\n{screen_info}"
-
-            self._context.append(
-                MessageBuilder.create_user_message(
-                    text=text_content, image_base64=screenshot.base64_data
-                )
-            )
-        else:
-            screen_info = MessageBuilder.build_screen_info(current_app)
-            text_content = f"** Screen Info **\n\n{screen_info}"
-
-            self._context.append(
-                MessageBuilder.create_user_message(
-                    text=text_content, image_base64=screenshot.base64_data
-                )
-            )
-
-        # Get model response
+        # Build messages + call model. plan() lets model errors propagate; the
+        # existing try/except below preserves the original failure StepResult.
         try:
-            msgs = get_messages(self.agent_config.lang)
-            print("\n" + "=" * 50)
-            print(f"💭 {msgs['thinking']}:")
-            print("-" * 50)
-            response = self.model_client.request(self._context)
+            response = self.planner.plan(
+                screenshot_base64=screenshot.base64_data,
+                current_app=current_app,
+                user_prompt=user_prompt,
+                is_first=is_first,
+            )
         except Exception as e:
             if self.agent_config.verbose:
                 traceback.print_exc()
@@ -184,27 +188,21 @@ class PhoneAgent:
                 action=None,
                 thinking="",
                 message=f"Model error: {e}",
+                screenshot_base64=screenshot.base64_data,
+                screenshot_width=screenshot.width,
+                screenshot_height=screenshot.height,
+                screenshot_is_sensitive=screenshot.is_sensitive,
+                current_app=current_app,
+                duration_ms=int((time.perf_counter() - step_started_at) * 1000),
             )
 
-        # Parse action from response
-        try:
-            action = parse_action(response.action)
-        except ValueError:
-            if self.agent_config.verbose:
-                traceback.print_exc()
-            action = finish(message=response.action)
+        # Parse action from response (parse owns the verbose action dump).
+        action = self.parser.parse(response.action)
 
-        if self.agent_config.verbose:
-            # Print thinking process
-            print("-" * 50)
-            print(f"🎯 {msgs['action']}:")
-            print(json.dumps(action, ensure_ascii=False, indent=2))
-            print("=" * 50 + "\n")
+        # Remove image from context to save space.
+        self.planner.strip_last_image()
 
-        # Remove image from context to save space
-        self._context[-1] = MessageBuilder.remove_images_from_message(self._context[-1])
-
-        # Execute action
+        # Execute action (execution stays on the agent for now).
         try:
             result = self.action_handler.execute(
                 action, screenshot.width, screenshot.height
@@ -216,12 +214,8 @@ class PhoneAgent:
                 finish(message=str(e)), screenshot.width, screenshot.height
             )
 
-        # Add assistant response to context
-        self._context.append(
-            MessageBuilder.create_assistant_message(
-                f"<think>{response.thinking}</think><answer>{response.action}</answer>"
-            )
-        )
+        # Add assistant response to context.
+        self.planner.append_assistant(response.thinking, response.action)
 
         # Check if finished
         finished = action.get("_metadata") == "finish" or result.should_finish
@@ -240,12 +234,19 @@ class PhoneAgent:
             action=action,
             thinking=response.thinking,
             message=result.message or action.get("message"),
+            screenshot_base64=screenshot.base64_data,
+            screenshot_width=screenshot.width,
+            screenshot_height=screenshot.height,
+            screenshot_is_sensitive=screenshot.is_sensitive,
+            current_app=current_app,
+            model_output=response.raw_content,
+            duration_ms=int((time.perf_counter() - step_started_at) * 1000),
         )
 
     @property
     def context(self) -> list[dict[str, Any]]:
-        """Get the current conversation context."""
-        return self._context.copy()
+        """Get the current conversation context (shallow copy)."""
+        return self.planner.context_copy()
 
     @property
     def step_count(self) -> int:

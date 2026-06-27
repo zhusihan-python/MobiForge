@@ -1,6 +1,7 @@
 """iOS PhoneAgent class for orchestrating iOS phone automation."""
 
 import json
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -39,6 +40,13 @@ class StepResult:
     action: dict[str, Any] | None
     thinking: str
     message: str | None = None
+    screenshot_base64: str | None = None
+    screenshot_width: int | None = None
+    screenshot_height: int | None = None
+    screenshot_is_sensitive: bool = False
+    current_app: str | None = None
+    model_output: str | None = None
+    duration_ms: int | None = None
 
 
 class IOSPhoneAgent:
@@ -155,6 +163,7 @@ class IOSPhoneAgent:
         self, user_prompt: str | None = None, is_first: bool = False
     ) -> StepResult:
         """Execute a single step of the agent loop."""
+        step_started_at = time.perf_counter()
         self._step_count += 1
 
         # Capture current screen state
@@ -203,6 +212,12 @@ class IOSPhoneAgent:
                 action=None,
                 thinking="",
                 message=f"Model error: {e}",
+                screenshot_base64=screenshot.base64_data,
+                screenshot_width=screenshot.width,
+                screenshot_height=screenshot.height,
+                screenshot_is_sensitive=screenshot.is_sensitive,
+                current_app=current_app,
+                duration_ms=int((time.perf_counter() - step_started_at) * 1000),
             )
 
         # Parse action from response
@@ -264,6 +279,13 @@ class IOSPhoneAgent:
             action=action,
             thinking=response.thinking,
             message=result.message or action.get("message"),
+            screenshot_base64=screenshot.base64_data,
+            screenshot_width=screenshot.width,
+            screenshot_height=screenshot.height,
+            screenshot_is_sensitive=screenshot.is_sensitive,
+            current_app=current_app,
+            model_output=response.raw_content,
+            duration_ms=int((time.perf_counter() - step_started_at) * 1000),
         )
 
     @property

@@ -32,6 +32,7 @@ from phone_agent.device_factory import DeviceType, get_device_factory, set_devic
 from phone_agent.model import ModelConfig
 from phone_agent.xctest import XCTestConnection
 from phone_agent.xctest import list_devices as list_ios_devices
+from runtime import RunRecorder, TaskRunner
 
 
 def check_system_requirements(
@@ -495,6 +496,26 @@ Examples:
     )
 
     parser.add_argument(
+        "--runs-dir",
+        type=str,
+        default=os.getenv("PHONE_AGENT_RUNS_DIR", "runs"),
+        help="Directory for task traces (default: runs)",
+    )
+
+    parser.add_argument(
+        "--no-record",
+        action="store_true",
+        help="Disable task trace recording",
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Task timeout in seconds, checked between steps",
+    )
+
+    parser.add_argument(
         "--list-apps", action="store_true", help="List supported apps and exit"
     )
 
@@ -817,11 +838,34 @@ def main():
 
     print("=" * 50)
 
+    def run_task(task: str):
+        recorder = None if args.no_record else RunRecorder(args.runs_dir)
+        runner = TaskRunner(
+            agent=agent,
+            recorder=recorder,
+            timeout_seconds=args.timeout,
+            metadata={
+                "device_type": args.device_type,
+                "device_id": agent_config.device_id,
+                "model": model_config.model_name,
+                "base_url": model_config.base_url,
+                "max_steps": agent_config.max_steps,
+                "language": agent_config.lang,
+            },
+        )
+        outcome = runner.run(task)
+        print(f"\nResult: {outcome.message}")
+        print(f"Status: {outcome.status.value}")
+        print(f"Steps: {outcome.steps}")
+        print(f"Duration: {outcome.duration_ms} ms")
+        if outcome.run_dir:
+            print(f"Trace: {outcome.run_dir}")
+        return outcome
+
     # Run with provided task or enter interactive mode
     if args.task:
         print(f"\nTask: {args.task}\n")
-        result = agent.run(args.task)
-        print(f"\nResult: {result}")
+        run_task(args.task)
     else:
         # Interactive mode
         print("\nEntering interactive mode. Type 'quit' to exit.\n")
@@ -838,9 +882,8 @@ def main():
                     continue
 
                 print()
-                result = agent.run(task)
-                print(f"\nResult: {result}\n")
-                agent.reset()
+                run_task(task)
+                print()
 
             except KeyboardInterrupt:
                 print("\n\nInterrupted. Goodbye!")
