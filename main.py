@@ -25,14 +25,24 @@ from openai import OpenAI
 from phone_agent import PhoneAgent
 from phone_agent.agent import AgentConfig
 from phone_agent.agent_ios import IOSAgentConfig, IOSPhoneAgent
+from phone_agent.actions import ActionHandler
+from phone_agent.config import get_system_prompt
 from phone_agent.config.apps import list_supported_apps
 from phone_agent.config.apps_harmonyos import list_supported_apps as list_harmonyos_apps
 from phone_agent.config.apps_ios import list_supported_apps as list_ios_apps
 from phone_agent.device_factory import DeviceType, get_device_factory, set_device_type
-from phone_agent.model import ModelConfig
+from phone_agent.model import ModelClient, ModelConfig
+from phone_agent.planner import ActionParser, ModelPlanner
 from phone_agent.xctest import XCTestConnection
 from phone_agent.xctest import list_devices as list_ios_devices
-from runtime import RunRecorder, TaskRunner
+from runtime import (
+    AdbDeviceEnv,
+    FreeformTask,
+    OpenAutoGLMAdapter,
+    RunRecorder,
+    Runner,
+    TaskRunner,
+)
 
 
 def check_system_requirements(
@@ -516,6 +526,19 @@ Examples:
     )
 
     parser.add_argument(
+        "--runtime",
+        type=str,
+        choices=["legacy", "new"],
+        default="legacy",
+        help=(
+            "Which runtime to use: 'legacy' (default, the TaskRunner wrapper) "
+            "or 'new' (the boundary-aware Runner + OpenAutoGLMAdapter + "
+            "AdbDeviceEnv). 'new' is ADB-only; hdc/ios are rejected (run without "
+            "--runtime, or --runtime legacy, for those device types)."
+        ),
+    )
+
+    parser.add_argument(
         "--list-apps", action="store_true", help="List supported apps and exit"
     )
 
@@ -839,28 +862,7 @@ def main():
     print("=" * 50)
 
     def run_task(task: str):
-        recorder = None if args.no_record else RunRecorder(args.runs_dir)
-        runner = TaskRunner(
-            agent=agent,
-            recorder=recorder,
-            timeout_seconds=args.timeout,
-            metadata={
-                "device_type": args.device_type,
-                "device_id": agent_config.device_id,
-                "model": model_config.model_name,
-                "base_url": model_config.base_url,
-                "max_steps": agent_config.max_steps,
-                "language": agent_config.lang,
-            },
-        )
-        outcome = runner.run(task)
-        print(f"\nResult: {outcome.message}")
-        print(f"Status: {outcome.status.value}")
-        print(f"Steps: {outcome.steps}")
-        print(f"Duration: {outcome.duration_ms} ms")
-        if outcome.run_dir:
-            print(f"Trace: {outcome.run_dir}")
-        return outcome
+        return _select_and_run(task, args, device_type, agent, agent_config, model_config)
 
     # Run with provided task or enter interactive mode
     if args.task:
@@ -890,6 +892,113 @@ def main():
                 break
             except Exception as e:
                 print(f"\nError: {e}\n")
+
+
+def _build_new_runner(model_config, agent_config, device_id, timeout_seconds):
+    """Construct the boundary-aware Runner for the new runtime path.
+
+    No device actions or model requests are performed here (it only wires
+    objects). Note it does call ``get_device_factory()``, which returns the
+    global factory singleton but does not itself touch a device. Built from the
+    same configs the CLI already has, so it does not reach into PhoneAgent
+    internals. Callable directly from tests to verify wiring + timeout/max_steps
+    propagation.
+    """
+    model_client = ModelClient(model_config)
+    planner = ModelPlanner(
+        model_client=model_client,
+        system_prompt=get_system_prompt(agent_config.lang),
+        lang=agent_config.lang,
+        verbose=agent_config.verbose,
+    )
+    parser = ActionParser(verbose=agent_config.verbose, lang=agent_config.lang)
+    adapter = OpenAutoGLMAdapter(planner, parser)
+    backend = AdbDeviceEnv(
+        device_factory=get_device_factory(),
+        action_handler=ActionHandler(device_id=device_id),
+        device_id=device_id,
+    )
+    return Runner(
+        adapter,
+        backend,
+        max_steps=agent_config.max_steps,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _run_task_legacy(task, args, agent, agent_config, model_config):
+    """Legacy runtime path (verbatim from the original run_task closure).
+
+    Byte-for-byte preserved: RunRecorder, TaskRunner metadata, outcome.steps,
+    outcome.status.value, and the Trace: line. Do NOT unify with the new path's
+    output here.
+    """
+    recorder = None if args.no_record else RunRecorder(args.runs_dir)
+    runner = TaskRunner(
+        agent=agent,
+        recorder=recorder,
+        timeout_seconds=args.timeout,
+        metadata={
+            "device_type": args.device_type,
+            "device_id": agent_config.device_id,
+            "model": model_config.model_name,
+            "base_url": model_config.base_url,
+            "max_steps": agent_config.max_steps,
+            "language": agent_config.lang,
+        },
+    )
+    outcome = runner.run(task)
+    print(f"\nResult: {outcome.message}")
+    print(f"Status: {outcome.status.value}")
+    print(f"Steps: {outcome.steps}")
+    print(f"Duration: {outcome.duration_ms} ms")
+    if outcome.run_dir:
+        print(f"Trace: {outcome.run_dir}")
+    return outcome
+
+
+def _run_task_new(task, args, model_config, agent_config):
+    """New runtime path: boundary-aware Runner + OpenAutoGLMAdapter + AdbDeviceEnv.
+
+    Uses InMemoryTrajectoryStore (no disk trace yet), so the Trace: line is
+    omitted. Output fields come from RunResult (note: steps_count, not steps).
+    """
+    runner = _build_new_runner(
+        model_config, agent_config, agent_config.device_id, args.timeout
+    )
+    result = runner.run(
+        FreeformTask(
+            task,
+            max_steps=agent_config.max_steps,
+            timeout_seconds=args.timeout,
+        )
+    )
+    print(f"\nResult: {result.message}")
+    print(f"Status: {result.status.value}")
+    print(f"Steps: {result.steps_count}")
+    print(f"Duration: {result.duration_ms} ms")
+    return result
+
+
+def _select_and_run(task, args, device_type, agent, agent_config, model_config):
+    """Dispatch a task to the legacy or new runtime path based on --runtime.
+
+    For consistent CLI UX in both interactive and non-interactive modes,
+    rejection (new runtime on hdc/ios) prints a clear notice and returns None
+    rather than raising — interactive mode would otherwise print 'Error: ...'
+    and non-interactive would bubble inconsistently. ADB is the only device type
+    supported by the new path's AdbDeviceEnv.
+    """
+    if args.runtime == "new":
+        if device_type != DeviceType.ADB:
+            print(
+                f"\n--runtime new supports ADB only; "
+                f"got device_type={device_type.value!r}. "
+                f"Run without --runtime (or --runtime legacy)."
+            )
+            return None
+        return _run_task_new(task, args, model_config, agent_config)
+    return _run_task_legacy(task, args, agent, agent_config, model_config)
 
 
 if __name__ == "__main__":
