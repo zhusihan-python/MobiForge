@@ -17,6 +17,9 @@ _DEFAULT_SIM_FIXTURES = (
     "open_settings.json",
     "type_note.json",
     "back_navigation.json",
+    "browser_search.json",
+    "form_fill.json",
+    "multi_step_navigation.json",
 )
 
 
@@ -49,8 +52,9 @@ class ScriptedAgentAdapter(AgentAdapter):
 def make_sim_smoke_cases() -> list[TaskCase]:
     """Return the built-in simulator smoke suite from JSON fixtures.
 
-    These are intentionally tiny but representative: app launch, text entry, and
-    navigation all mutate structured state that a deterministic judge can verify.
+    These are intentionally tiny but representative: app launch, text entry,
+    browser search, form submission, and navigation all mutate structured state
+    that a deterministic judge can verify.
     """
     return load_sim_smoke_cases()
 

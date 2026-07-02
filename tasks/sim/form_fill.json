@@ -1,0 +1,67 @@
+{
+  "id": "sim.form_fill",
+  "tags": ["sim", "form", "input"],
+  "task": {
+    "mode": "verifiable",
+    "description": "fill and submit a simulator form",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Forms",
+          "current_page": "submitted",
+          "form": {
+            "fields": {
+              "name": "Ada Lovelace",
+              "email": "ada@example.com"
+            },
+            "submitted": true
+          }
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home"
+    },
+    "goal": "required form fields are filled and submitted",
+    "max_steps": 10
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Forms"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "field:name"
+        }
+      },
+      {
+        "type": "type_text",
+        "text": "Ada Lovelace"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "field:email"
+        }
+      },
+      {
+        "type": "type_text",
+        "text": "ada@example.com"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "submit_form"
+        }
+      },
+      {
+        "type": "finish",
+        "text": "form submitted"
+      }
+    ]
+  }
+}

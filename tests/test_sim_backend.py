@@ -40,6 +40,10 @@ def _finish(message="done"):
     return Action(type=ActionType.FINISH, text=message)
 
 
+def _tap_target(target):
+    return Action(type=ActionType.TAP, raw={"target": target})
+
+
 class SimulatedDeviceEnvTests(unittest.TestCase):
     def test_observe_exposes_structured_state_and_sim_metadata(self):
         env = SimulatedDeviceEnv(initial_state={"current_app": "Settings"})
@@ -79,6 +83,53 @@ class SimulatedDeviceEnvTests(unittest.TestCase):
 
         env.execute(Action(type=ActionType.BACK))
         self.assertEqual(env.observe().env_state["current_app"], "Settings")
+
+    def test_browser_search_updates_structured_state(self):
+        env = SimulatedDeviceEnv()
+
+        env.execute(_launch("Browser"))
+        env.execute(_tap_target("search_box"))
+        env.execute(Action(type=ActionType.TYPE_TEXT, text="mobiforge"))
+        env.execute(_tap_target("search_submit"))
+        state = env.observe().env_state
+
+        self.assertEqual(state["current_app"], "Browser")
+        self.assertEqual(state["current_page"], "results")
+        self.assertEqual(state["browser"]["query"], "mobiforge")
+        self.assertTrue(state["browser"]["results_visible"])
+        self.assertTrue(state["browser"]["submitted"])
+
+    def test_form_targets_focus_fields_and_submit(self):
+        env = SimulatedDeviceEnv()
+
+        env.execute(_launch("Forms"))
+        env.execute(_tap_target("field:name"))
+        env.execute(Action(type=ActionType.TYPE_TEXT, text="Ada Lovelace"))
+        env.execute(_tap_target("field:email"))
+        env.execute(Action(type=ActionType.TYPE_TEXT, text="ada@example.com"))
+        env.execute(_tap_target("submit_form"))
+        state = env.observe().env_state
+
+        self.assertEqual(state["form"]["fields"]["name"], "Ada Lovelace")
+        self.assertEqual(state["form"]["fields"]["email"], "ada@example.com")
+        self.assertTrue(state["form"]["submitted"])
+        self.assertEqual(state["form"]["last_submission"], state["form"]["fields"])
+        self.assertEqual(state["current_page"], "submitted")
+
+    def test_in_app_navigation_back_precedes_app_history_back(self):
+        env = SimulatedDeviceEnv(
+            initial_state={"app_pages": {"Workspace": "dashboard"}}
+        )
+
+        env.execute(_launch("Workspace"))
+        env.execute(_tap_target("nav:projects"))
+        env.execute(_tap_target("nav:project_alpha"))
+        env.execute(Action(type=ActionType.BACK))
+        state = env.observe().env_state
+
+        self.assertEqual(state["current_app"], "Workspace")
+        self.assertEqual(state["current_page"], "projects")
+        self.assertEqual(state["navigation"]["last_page"], "projects")
 
 
 class StateJudgeTests(unittest.TestCase):

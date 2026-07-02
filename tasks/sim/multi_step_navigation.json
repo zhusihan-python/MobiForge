@@ -1,0 +1,61 @@
+{
+  "id": "sim.multi_step_navigation",
+  "tags": ["sim", "navigation", "multi-step"],
+  "task": {
+    "mode": "verifiable",
+    "description": "navigate across several simulator app pages",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Workspace",
+          "current_page": "project_beta",
+          "navigation": {
+            "last_page": "project_beta"
+          }
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home",
+      "app_pages": {
+        "Workspace": "dashboard"
+      }
+    },
+    "goal": "Workspace ends on the project_beta detail page after a back navigation",
+    "max_steps": 10
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Workspace"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "nav:projects"
+        }
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "nav:project_alpha"
+        }
+      },
+      {
+        "type": "back"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "nav:project_beta"
+        }
+      },
+      {
+        "type": "finish",
+        "text": "navigated to project_beta"
+      }
+    ]
+  }
+}

@@ -38,8 +38,12 @@ class SimulatedDeviceEnv(EnvBackend):
     backend maintains:
 
     - ``current_app``: current simulated app name.
+    - ``current_page``: page/screen within the current app.
     - ``history``: app navigation stack used by ``BACK``.
+    - ``page_history``: in-app navigation stack used by ``BACK`` before app
+      history.
     - ``text_input``: latest text typed by ``TYPE_TEXT``.
+    - ``focused_field``: dotted state path populated by the next ``TYPE_TEXT``.
     - ``events``: normalized action events executed in this run.
 
     ``VerifiableTask.setup`` can overlay any of these fields, or add task-owned
@@ -66,8 +70,23 @@ class SimulatedDeviceEnv(EnvBackend):
     def reset(self) -> None:
         self.state = {
             "current_app": "home",
+            "current_page": "home",
             "history": [],
+            "page_history": [],
+            "focused_field": None,
             "text_input": "",
+            "browser": {
+                "query": "",
+                "results_visible": False,
+                "submitted": False,
+            },
+            "form": {
+                "fields": {},
+                "submitted": False,
+            },
+            "navigation": {
+                "visited": [],
+            },
             "events": [],
         }
         _deep_update(self.state, deepcopy(self.initial_state))
@@ -106,6 +125,12 @@ class SimulatedDeviceEnv(EnvBackend):
             return self._back(action)
         if action.type is ActionType.TYPE_TEXT:
             return self._type_text(action)
+        if action.type in {
+            ActionType.TAP,
+            ActionType.DOUBLE_TAP,
+            ActionType.LONG_PRESS,
+        }:
+            return self._tap(action)
 
         self._record_event(action)
         return EnvResult(success=True)
@@ -115,23 +140,81 @@ class SimulatedDeviceEnv(EnvBackend):
             return EnvResult(success=False, message="No app specified")
         self._push_history()
         self.state["current_app"] = action.app
+        self.state["current_page"] = self._default_page_for(action.app)
+        self.state["page_history"] = []
+        self.state["focused_field"] = None
         self._record_event(action)
         return EnvResult(success=True)
 
     def _home(self, action: Action) -> EnvResult:
         self._push_history()
         self.state["current_app"] = "home"
+        self.state["current_page"] = "home"
+        self.state["page_history"] = []
+        self.state["focused_field"] = None
         self._record_event(action)
         return EnvResult(success=True)
 
     def _back(self, action: Action) -> EnvResult:
-        history = self.state.setdefault("history", [])
-        self.state["current_app"] = history.pop() if history else "home"
+        page_history = self.state.setdefault("page_history", [])
+        if page_history:
+            self.state["current_page"] = page_history.pop()
+            self._mark_page_visited(self.state["current_page"])
+        else:
+            history = self.state.setdefault("history", [])
+            self.state["current_app"] = history.pop() if history else "home"
+            self.state["current_page"] = self._default_page_for(
+                str(self.state.get("current_app", "home"))
+            )
+        self.state["focused_field"] = None
         self._record_event(action)
         return EnvResult(success=True)
 
     def _type_text(self, action: Action) -> EnvResult:
-        self.state["text_input"] = action.text or ""
+        text = action.text or ""
+        self.state["text_input"] = text
+        focused_field = self.state.get("focused_field")
+        if isinstance(focused_field, str) and focused_field:
+            _set_dotted_path(self.state, focused_field, text)
+        elif self.state.get("current_app") == "Browser":
+            self.state.setdefault("browser", {})["query"] = text
+        self._record_event(action)
+        return EnvResult(success=True)
+
+    def _tap(self, action: Action) -> EnvResult:
+        target = _action_hint(action, "target")
+        if target in {"search_box", "browser.search_box"}:
+            self.state["focused_field"] = "browser.query"
+        elif target in {"search_submit", "browser.search_submit"}:
+            browser = self.state.setdefault("browser", {})
+            if not browser.get("query"):
+                browser["query"] = self.state.get("text_input", "")
+            browser["submitted"] = True
+            browser["results_visible"] = True
+            self._navigate_page("results")
+            self.state["focused_field"] = None
+        elif isinstance(target, str) and target.startswith("field:"):
+            field_name = target.split(":", 1)[1]
+            if not field_name:
+                return EnvResult(success=False, message="Empty form field target")
+            self.state["focused_field"] = f"form.fields.{field_name}"
+        elif target == "submit_form":
+            form = self.state.setdefault("form", {})
+            fields = form.setdefault("fields", {})
+            form["submitted"] = True
+            form["last_submission"] = deepcopy(fields)
+            self._navigate_page("submitted")
+            self.state["focused_field"] = None
+        elif isinstance(target, str) and target.startswith("nav:"):
+            page = target.split(":", 1)[1]
+            if not page:
+                return EnvResult(success=False, message="Empty navigation target")
+            self._navigate_page(page)
+            self.state["focused_field"] = None
+        elif _action_hint(action, "page"):
+            self._navigate_page(str(_action_hint(action, "page")))
+            self.state["focused_field"] = None
+
         self._record_event(action)
         return EnvResult(success=True)
 
@@ -140,6 +223,24 @@ class SimulatedDeviceEnv(EnvBackend):
         if current:
             self.state.setdefault("history", []).append(current)
 
+    def _default_page_for(self, app: str) -> str:
+        app_pages = self.state.get("app_pages")
+        if isinstance(app_pages, dict) and isinstance(app_pages.get(app), str):
+            return app_pages[app]
+        return "home"
+
+    def _navigate_page(self, page: str) -> None:
+        current_page = self.state.get("current_page")
+        if current_page and current_page != page:
+            self.state.setdefault("page_history", []).append(current_page)
+        self.state["current_page"] = page
+        self._mark_page_visited(page)
+
+    def _mark_page_visited(self, page: str) -> None:
+        navigation = self.state.setdefault("navigation", {})
+        navigation["last_page"] = page
+        navigation.setdefault("visited", []).append(page)
+
     def _record_event(self, action: Action) -> None:
         event = {
             "type": action.type.value,
@@ -147,6 +248,7 @@ class SimulatedDeviceEnv(EnvBackend):
             "text": action.text,
             "app": action.app,
             "duration_ms": action.duration_ms,
+            "target": _action_hint(action, "target"),
         }
         self.state["last_action"] = event
         self.state.setdefault("events", []).append(event)
@@ -160,3 +262,23 @@ def _deep_update(target: dict[str, Any], update: dict[str, Any]) -> dict[str, An
         else:
             target[key] = value
     return target
+
+
+def _action_hint(action: Action, key: str) -> Any:
+    raw = action.raw if isinstance(action.raw, dict) else {}
+    sim = raw.get("sim") if isinstance(raw.get("sim"), dict) else {}
+    return sim.get(key, raw.get(key))
+
+
+def _set_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
+    parts = [part for part in path.split(".") if part]
+    if not parts:
+        return
+    cursor = target
+    for part in parts[:-1]:
+        child = cursor.setdefault(part, {})
+        if not isinstance(child, dict):
+            child = {}
+            cursor[part] = child
+        cursor = child
+    cursor[parts[-1]] = value

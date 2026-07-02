@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from runtime import run_sim_smoke_suite
+from runtime import load_sim_smoke_cases, run_sim_smoke_suite
 
 
 def main() -> None:
@@ -22,9 +22,15 @@ def main() -> None:
         type=str,
         help="Write the machine-readable JSON report to this path",
     )
+    parser.add_argument(
+        "--tasks-dir",
+        type=str,
+        help="Load simulator task fixtures from this directory instead of the built-ins",
+    )
     args = parser.parse_args()
 
-    result = run_sim_smoke_suite()
+    cases = load_sim_smoke_cases(args.tasks_dir) if args.tasks_dir else None
+    result = run_sim_smoke_suite(cases)
     if args.json_out:
         out_path = result.write_json(args.json_out)
         if not args.json:

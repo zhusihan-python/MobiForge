@@ -1,0 +1,55 @@
+{
+  "id": "sim.browser_search",
+  "tags": ["sim", "browser", "search"],
+  "task": {
+    "mode": "verifiable",
+    "description": "search the web in simulator browser",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Browser",
+          "current_page": "results",
+          "browser": {
+            "query": "mobiforge",
+            "results_visible": true,
+            "submitted": true
+          }
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home"
+    },
+    "goal": "Browser shows search results for mobiforge",
+    "max_steps": 8
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Browser"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "search_box"
+        }
+      },
+      {
+        "type": "type_text",
+        "text": "mobiforge"
+      },
+      {
+        "type": "tap",
+        "raw": {
+          "target": "search_submit"
+        }
+      },
+      {
+        "type": "finish",
+        "text": "search results visible"
+      }
+    ]
+  }
+}

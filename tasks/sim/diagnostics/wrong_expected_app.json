@@ -1,0 +1,33 @@
+{
+  "id": "sim.diagnostics.wrong_expected_app",
+  "tags": ["sim", "diagnostic", "expected-failure"],
+  "task": {
+    "mode": "verifiable",
+    "description": "intentionally fail to demonstrate state judge diagnostics",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Settings"
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home"
+    },
+    "goal": "This fixture should fail: script opens Browser but judge expects Settings",
+    "max_steps": 5
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Browser"
+      },
+      {
+        "type": "finish",
+        "text": "opened browser"
+      }
+    ]
+  }
+}

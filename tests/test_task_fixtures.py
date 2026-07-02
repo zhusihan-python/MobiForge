@@ -21,12 +21,23 @@ class TaskFixtureLoadingTests(unittest.TestCase):
 
         self.assertEqual(
             [case.id for case in cases],
-            ["sim.open_settings", "sim.type_note", "sim.back_navigation"],
+            [
+                "sim.open_settings",
+                "sim.type_note",
+                "sim.back_navigation",
+                "sim.browser_search",
+                "sim.form_fill",
+                "sim.multi_step_navigation",
+            ],
         )
         self.assertTrue(all(isinstance(case.task, VerifiableTask) for case in cases))
         self.assertTrue(all(case.task.judge_ref is not None for case in cases))
         self.assertTrue(all(isinstance(case.metadata["script"][0], Action) for case in cases))
         self.assertEqual(cases[0].metadata["script"][0].type, ActionType.LAUNCH_APP)
+        self.assertNotIn(
+            "sim.diagnostics.wrong_expected_app",
+            [case.id for case in cases],
+        )
 
     def test_load_task_case_from_json_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
