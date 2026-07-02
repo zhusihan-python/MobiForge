@@ -20,11 +20,8 @@ import subprocess
 import sys
 from urllib.parse import urlparse
 
-from openai import OpenAI
-
 from phone_agent import PhoneAgent
 from phone_agent.agent import AgentConfig
-from phone_agent.agent_ios import IOSAgentConfig, IOSPhoneAgent
 from phone_agent.actions import ActionHandler
 from phone_agent.config import get_system_prompt
 from phone_agent.config.apps import list_supported_apps
@@ -33,8 +30,6 @@ from phone_agent.config.apps_ios import list_supported_apps as list_ios_apps
 from phone_agent.device_factory import DeviceType, get_device_factory, set_device_type
 from phone_agent.model import ModelClient, ModelConfig
 from phone_agent.planner import ActionParser, ModelPlanner
-from phone_agent.xctest import XCTestConnection
-from phone_agent.xctest import list_devices as list_ios_devices
 from runtime import (
     AdbDeviceEnv,
     DiskTrajectoryStore,
@@ -44,6 +39,30 @@ from runtime import (
     Runner,
     TaskRunner,
 )
+
+
+_OPENAI_MISSING_MESSAGE = (
+    "OpenAI SDK is not installed. Install project dependencies with "
+    "`pip install -r requirements.txt` or install `openai` directly."
+)
+
+
+def _load_ios_agent_classes():
+    from phone_agent.agent_ios import IOSAgentConfig, IOSPhoneAgent
+
+    return IOSAgentConfig, IOSPhoneAgent
+
+
+def _create_xctest_connection(wda_url: str):
+    from phone_agent.xctest import XCTestConnection
+
+    return XCTestConnection(wda_url=wda_url)
+
+
+def _list_ios_devices():
+    from phone_agent.xctest import list_devices
+
+    return list_devices()
 
 
 def check_system_requirements(
@@ -153,7 +172,7 @@ def check_system_requirements(
             lines = result.stdout.strip().split("\n")
             devices = [line for line in lines if line.strip()]
         else:  # IOS
-            ios_devices = list_ios_devices()
+            ios_devices = _list_ios_devices()
             devices = [d.device_id for d in ios_devices]
 
         if not devices:
@@ -246,7 +265,7 @@ def check_system_requirements(
         # Check WebDriverAgent
         print(f"3. Checking WebDriverAgent ({wda_url})...", end=" ")
         try:
-            conn = XCTestConnection(wda_url=wda_url)
+            conn = _create_xctest_connection(wda_url)
 
             if conn.is_wda_ready():
                 print("✅ OK")
@@ -305,6 +324,8 @@ def check_model_api(base_url: str, model_name: str, api_key: str = "EMPTY") -> b
     # Check 1: Network connectivity using chat API
     print(f"1. Checking API connectivity ({base_url})...", end=" ")
     try:
+        from openai import OpenAI
+
         # Create OpenAI client
         client = OpenAI(base_url=base_url, api_key=api_key, timeout=30.0)
 
@@ -330,7 +351,9 @@ def check_model_api(base_url: str, model_name: str, api_key: str = "EMPTY") -> b
         error_msg = str(e)
 
         # Provide more specific error messages
-        if "Connection refused" in error_msg or "Connection error" in error_msg:
+        if isinstance(e, ModuleNotFoundError) and e.name == "openai":
+            print(f"   Error: {_OPENAI_MISSING_MESSAGE}")
+        elif "Connection refused" in error_msg or "Connection error" in error_msg:
             print(f"   Error: Cannot connect to {base_url}")
             print("   Solution:")
             print("     1. Check if the model server is running")
@@ -576,11 +599,11 @@ def handle_ios_device_commands(args) -> bool:
     Returns:
         True if a device command was handled (should exit), False otherwise.
     """
-    conn = XCTestConnection(wda_url=args.wda_url)
+    conn = _create_xctest_connection(args.wda_url)
 
     # Handle --list-devices
     if args.list_devices:
-        devices = list_ios_devices()
+        devices = _list_ios_devices()
         if not devices:
             print("No iOS devices connected.")
             print("\nTroubleshooting:")
@@ -799,6 +822,7 @@ def main():
 
     if device_type == DeviceType.IOS:
         # Create iOS agent
+        IOSAgentConfig, IOSPhoneAgent = _load_ios_agent_classes()
         agent_config = IOSAgentConfig(
             max_steps=args.max_steps,
             wda_url=args.wda_url,
@@ -844,7 +868,7 @@ def main():
 
     # Show device info
     if device_type == DeviceType.IOS:
-        devices = list_ios_devices()
+        devices = _list_ios_devices()
         if agent_config.device_id:
             print(f"Device: {agent_config.device_id}")
         elif devices:
@@ -981,7 +1005,7 @@ def _run_task_new(task, args, model_config, agent_config):
             },
         )
     runner = _build_new_runner(
-        model_config, agent_config, agent_config.device_id, args.timeout, store=store
+        model_config, agent_config, agent_config.device_id, args.timeout, store
     )
     result = runner.run(
         FreeformTask(

@@ -23,12 +23,35 @@ plan for the locked step order.
 from __future__ import annotations
 
 import json
+import sys
 import traceback
 from typing import Any, Optional
 
 from phone_agent.actions.handler import finish, parse_action
 from phone_agent.config import get_messages
 from phone_agent.model.client import MessageBuilder, ModelClient, ModelResponse
+
+
+def _console_print(*args, **kwargs) -> None:
+    """Print text without crashing on legacy console encodings."""
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        file = kwargs.get("file") or sys.stdout
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        text = sep.join(str(arg) for arg in args) + end
+        encoding = getattr(file, "encoding", None) or "utf-8"
+        if hasattr(file, "buffer"):
+            file.buffer.write(text.encode(encoding, errors="replace"))
+            if kwargs.get("flush", False):
+                file.flush()
+        else:
+            file.write(
+                text.encode(encoding, errors="replace").decode(
+                    encoding, errors="replace"
+                )
+            )
 
 
 class ModelPlanner:
@@ -108,9 +131,9 @@ class ModelPlanner:
             )
 
         msgs = get_messages(self.lang)
-        print("\n" + "=" * 50)
-        print(f"💭 {msgs['thinking']}:")
-        print("-" * 50)
+        _console_print("\n" + "=" * 50)
+        _console_print(f"💭 {msgs['thinking']}:")
+        _console_print("-" * 50)
         return self.model_client.request(self._context)
 
 
@@ -140,9 +163,9 @@ class ActionParser:
 
         if self.verbose:
             msgs = get_messages(self.lang)
-            print("-" * 50)
-            print(f"🎯 {msgs['action']}:")
-            print(json.dumps(action, ensure_ascii=False, indent=2))
-            print("=" * 50 + "\n")
+            _console_print("-" * 50)
+            _console_print(f"🎯 {msgs['action']}:")
+            _console_print(json.dumps(action, ensure_ascii=False, indent=2))
+            _console_print("=" * 50 + "\n")
 
         return action

@@ -5,9 +5,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import OpenAI
-
 from phone_agent.config.i18n import get_message
+
+
+_OPENAI_MISSING_MESSAGE = (
+    "OpenAI SDK is not installed. Install project dependencies with "
+    "`pip install -r requirements.txt` or install `openai` directly."
+)
 
 
 @dataclass
@@ -48,7 +52,13 @@ class ModelClient:
 
     def __init__(self, config: ModelConfig | None = None):
         self.config = config or ModelConfig()
-        self.client = OpenAI(base_url=self.config.base_url, api_key=self.config.api_key)
+        openai_cls, import_error = _load_openai_client_class()
+        self._openai_import_error = import_error
+        self.client = (
+            openai_cls(base_url=self.config.base_url, api_key=self.config.api_key)
+            if openai_cls is not None
+            else None
+        )
 
     def request(self, messages: list[dict[str, Any]]) -> ModelResponse:
         """
@@ -63,6 +73,9 @@ class ModelClient:
         Raises:
             ValueError: If the response cannot be parsed.
         """
+        if self.client is None:
+            raise RuntimeError(_OPENAI_MISSING_MESSAGE) from self._openai_import_error
+
         # Start timing
         start_time = time.time()
         time_to_first_token = None
@@ -288,3 +301,13 @@ class MessageBuilder:
         """
         info = {"current_app": current_app, **extra_info}
         return json.dumps(info, ensure_ascii=False)
+
+
+def _load_openai_client_class():
+    try:
+        from openai import OpenAI
+    except ModuleNotFoundError as exc:
+        if exc.name == "openai":
+            return None, exc
+        raise
+    return OpenAI, None
