@@ -44,6 +44,11 @@ from runtime.schemas import (
     VerifiableTask,
 )
 from runtime.task_runner import TaskRunResult, TaskRunner, TaskStatus
+from runtime.task_fixtures import (
+    load_task_case,
+    load_task_cases,
+    load_task_cases_from_dir,
+)
 from runtime.task_suite import (
     TaskCase,
     TaskCaseResult,
@@ -58,6 +63,7 @@ _LAZY_EXPORTS = {
     "ScriptedAgentAdapter": ("runtime.sim_suite", "ScriptedAgentAdapter"),
     "SimulatedDeviceEnv": ("runtime.sim_backends", "SimulatedDeviceEnv"),
     "StateJudge": ("runtime.judges", "StateJudge"),
+    "load_sim_smoke_cases": ("runtime.sim_suite", "load_sim_smoke_cases"),
     "make_sim_smoke_cases": ("runtime.sim_suite", "make_sim_smoke_cases"),
     "run_sim_smoke_suite": ("runtime.sim_suite", "run_sim_smoke_suite"),
 }
@@ -105,6 +111,10 @@ __all__ = [
     "TaskSuiteRunner",
     "VerifiableTask",
     "build_default_judge_registry",
+    "load_sim_smoke_cases",
+    "load_task_case",
+    "load_task_cases",
+    "load_task_cases_from_dir",
     "make_sim_smoke_cases",
     "resolve_task_judge",
     "run_sim_smoke_suite",

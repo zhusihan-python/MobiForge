@@ -1,0 +1,38 @@
+{
+  "id": "sim.type_note",
+  "tags": ["sim", "input"],
+  "task": {
+    "mode": "verifiable",
+    "description": "type text into notes in simulator",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Notes",
+          "text_input": "hello"
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home"
+    },
+    "goal": "Notes is open and text_input is hello",
+    "max_steps": 5
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Notes"
+      },
+      {
+        "type": "type_text",
+        "text": "hello"
+      },
+      {
+        "type": "finish",
+        "text": "typed hello"
+      }
+    ]
+  }
+}

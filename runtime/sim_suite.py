@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
 from runtime.boundary import AgentAdapter
-from runtime.schemas import Action, ActionType, JudgeRef, Observation, VerifiableTask
+from runtime.schemas import Action, Observation
 from runtime.sim_backends import SimulatedDeviceEnv
+from runtime.task_fixtures import load_task_case, load_task_cases_from_dir
 from runtime.task_suite import TaskCase, TaskSuiteResult, TaskSuiteRunner
+
+
+SIM_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "tasks" / "sim"
+_DEFAULT_SIM_FIXTURES = (
+    "open_settings.json",
+    "type_note.json",
+    "back_navigation.json",
+)
 
 
 class ScriptedAgentAdapter(AgentAdapter):
@@ -37,81 +47,20 @@ class ScriptedAgentAdapter(AgentAdapter):
 
 
 def make_sim_smoke_cases() -> list[TaskCase]:
-    """Return the built-in simulator smoke suite.
+    """Return the built-in simulator smoke suite from JSON fixtures.
 
     These are intentionally tiny but representative: app launch, text entry, and
     navigation all mutate structured state that a deterministic judge can verify.
     """
-    return [
-        TaskCase(
-            id="sim.open_settings",
-            task=VerifiableTask(
-                description="open settings in simulator",
-                judge_ref=JudgeRef(
-                    judge_type="state",
-                    config={"expected_state": {"current_app": "Settings"}},
-                ),
-                setup={"current_app": "home"},
-                goal="current_app is Settings",
-                max_steps=5,
-            ),
-            tags=("sim", "launch"),
-            metadata={
-                "script": [
-                    _launch("Settings"),
-                    _finish("opened settings"),
-                ]
-            },
-        ),
-        TaskCase(
-            id="sim.type_note",
-            task=VerifiableTask(
-                description="type text into notes in simulator",
-                judge_ref=JudgeRef(
-                    judge_type="state",
-                    config={
-                        "expected_state": {
-                            "current_app": "Notes",
-                            "text_input": "hello",
-                        }
-                    },
-                ),
-                setup={"current_app": "home"},
-                goal="Notes is open and text_input is hello",
-                max_steps=5,
-            ),
-            tags=("sim", "input"),
-            metadata={
-                "script": [
-                    _launch("Notes"),
-                    Action(type=ActionType.TYPE_TEXT, text="hello"),
-                    _finish("typed hello"),
-                ]
-            },
-        ),
-        TaskCase(
-            id="sim.back_navigation",
-            task=VerifiableTask(
-                description="navigate back from browser to settings in simulator",
-                judge_ref=JudgeRef(
-                    judge_type="state",
-                    config={"expected_state": {"current_app": "Settings"}},
-                ),
-                setup={"current_app": "home"},
-                goal="back returns from Browser to Settings",
-                max_steps=6,
-            ),
-            tags=("sim", "navigation"),
-            metadata={
-                "script": [
-                    _launch("Settings"),
-                    _launch("Browser"),
-                    Action(type=ActionType.BACK),
-                    _finish("back to settings"),
-                ]
-            },
-        ),
-    ]
+    return load_sim_smoke_cases()
+
+
+def load_sim_smoke_cases(directory: str | Path | None = None) -> list[TaskCase]:
+    """Load simulator smoke cases from a fixture directory."""
+    fixture_dir = Path(directory) if directory is not None else SIM_FIXTURES_DIR
+    if directory is None:
+        return [load_task_case(fixture_dir / name) for name in _DEFAULT_SIM_FIXTURES]
+    return load_task_cases_from_dir(fixture_dir)
 
 
 def run_sim_smoke_suite(cases: Iterable[TaskCase] | None = None) -> TaskSuiteResult:
@@ -128,11 +77,3 @@ def _scripted_adapter_factory(case: TaskCase) -> ScriptedAgentAdapter:
     if not isinstance(script, list):
         raise ValueError(f"Task case {case.id!r} is missing a script list")
     return ScriptedAgentAdapter(script)
-
-
-def _launch(app: str) -> Action:
-    return Action(type=ActionType.LAUNCH_APP, app=app)
-
-
-def _finish(message: str) -> Action:
-    return Action(type=ActionType.FINISH, text=message)

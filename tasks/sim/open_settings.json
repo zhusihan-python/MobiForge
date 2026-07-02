@@ -1,0 +1,33 @@
+{
+  "id": "sim.open_settings",
+  "tags": ["sim", "launch"],
+  "task": {
+    "mode": "verifiable",
+    "description": "open settings in simulator",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Settings"
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home"
+    },
+    "goal": "current_app is Settings",
+    "max_steps": 5
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Settings"
+      },
+      {
+        "type": "finish",
+        "text": "opened settings"
+      }
+    ]
+  }
+}

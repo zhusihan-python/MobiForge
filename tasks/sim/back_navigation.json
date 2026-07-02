@@ -1,0 +1,40 @@
+{
+  "id": "sim.back_navigation",
+  "tags": ["sim", "navigation"],
+  "task": {
+    "mode": "verifiable",
+    "description": "navigate back from browser to settings in simulator",
+    "judge_ref": {
+      "judge_type": "state",
+      "config": {
+        "expected_state": {
+          "current_app": "Settings"
+        }
+      }
+    },
+    "setup": {
+      "current_app": "home"
+    },
+    "goal": "back returns from Browser to Settings",
+    "max_steps": 6
+  },
+  "metadata": {
+    "script": [
+      {
+        "type": "launch_app",
+        "app": "Settings"
+      },
+      {
+        "type": "launch_app",
+        "app": "Browser"
+      },
+      {
+        "type": "back"
+      },
+      {
+        "type": "finish",
+        "text": "back to settings"
+      }
+    ]
+  }
+}
