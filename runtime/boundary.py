@@ -55,6 +55,15 @@ class EnvBackend(ABC):
     def reset(self) -> None:
         """Reset to the task's initial state before a run."""
 
+    def apply_task_setup(self, task: TaskSpec) -> None:
+        """Apply task-specific setup after reset.
+
+        Simulation backends can inject structured state from
+        ``VerifiableTask.setup`` here. Real-device backends usually leave this as
+        a no-op because setup is done through explicit device actions.
+        """
+        return None
+
     @abstractmethod
     def observe(self) -> Observation:
         """Capture the current screen/environment state."""
@@ -308,6 +317,7 @@ class Runner:
 
         self.adapter.reset(description)
         self.backend.reset()
+        self.backend.apply_task_setup(task)
 
         started_at = time.perf_counter()
         steps: list[StepResult] = []

@@ -8,7 +8,8 @@ the boundary-aware Runner live alongside the spike so the two can be compared as
 an oracle during the ``PhoneAgent.step()`` migration (ADR-0001).
 """
 
-from runtime.adapters import OpenAutoGLMAdapter
+from importlib import import_module
+
 from runtime.boundary import (
     AgentAdapter,
     EnvBackend,
@@ -19,7 +20,6 @@ from runtime.boundary import (
     RunResult,
     TrajectoryStore,
 )
-from runtime.env_backends import AdbDeviceEnv
 from runtime.run_recorder import RunRecorder
 from runtime.schemas import (
     Action,
@@ -38,6 +38,22 @@ from runtime.schemas import (
     VerifiableTask,
 )
 from runtime.task_runner import TaskRunResult, TaskRunner, TaskStatus
+from runtime.task_suite import (
+    TaskCase,
+    TaskCaseResult,
+    TaskSuiteResult,
+    TaskSuiteRunner,
+)
+
+_LAZY_EXPORTS = {
+    "AdbDeviceEnv": ("runtime.env_backends", "AdbDeviceEnv"),
+    "OpenAutoGLMAdapter": ("runtime.adapters", "OpenAutoGLMAdapter"),
+    "ScriptedAgentAdapter": ("runtime.sim_suite", "ScriptedAgentAdapter"),
+    "SimulatedDeviceEnv": ("runtime.sim_backends", "SimulatedDeviceEnv"),
+    "StateJudge": ("runtime.judges", "StateJudge"),
+    "make_sim_smoke_cases": ("runtime.sim_suite", "make_sim_smoke_cases"),
+    "run_sim_smoke_suite": ("runtime.sim_suite", "run_sim_smoke_suite"),
+}
 
 __all__ = [
     # Legacy spike
@@ -68,7 +84,32 @@ __all__ = [
     "ResumePoint",
     "RunStatus",
     "SafetyMeta",
+    "ScriptedAgentAdapter",
     "Size",
+    "SimulatedDeviceEnv",
+    "StateJudge",
+    "TaskCase",
+    "TaskCaseResult",
     "StepResult",
+    "TaskSuiteResult",
+    "TaskSuiteRunner",
     "VerifiableTask",
+    "make_sim_smoke_cases",
+    "run_sim_smoke_suite",
 ]
+
+
+def __getattr__(name):
+    """Lazily expose optional runtime integrations.
+
+    Core schemas and the boundary runner are importable without model or device
+    dependencies. Adapter/backend implementations load only when explicitly
+    requested.
+    """
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = target
+    value = getattr(import_module(module_name), attr_name)
+    globals()[name] = value
+    return value

@@ -5,6 +5,10 @@
 > Run it before writing the disk `TrajectoryStore` — execution-layer bugs must be
 > isolated from recording-layer ones.
 
+> TODO: Real-device validation is currently blocked because no ADB phone/emulator
+> is available in the working environment. Keep this checklist open and run it
+> before flipping the runtime default or claiming Phase 2 device coverage.
+
 ## Prerequisites
 
 1. **One ADB device connected**, authorized (`adb devices` shows `device`, not
