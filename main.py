@@ -18,7 +18,6 @@ import os
 import shutil
 import subprocess
 import sys
-from urllib.parse import urlparse
 
 from phone_agent import PhoneAgent
 from phone_agent.agent import AgentConfig
@@ -28,7 +27,7 @@ from phone_agent.config.apps import list_supported_apps
 from phone_agent.config.apps_harmonyos import list_supported_apps as list_harmonyos_apps
 from phone_agent.config.apps_ios import list_supported_apps as list_ios_apps
 from phone_agent.device_factory import DeviceType, get_device_factory, set_device_type
-from phone_agent.model import ModelClient, ModelConfig
+from phone_agent.model import ModelClient, ModelConfig, OpenAICompatibleHTTPClient
 from phone_agent.planner import ActionParser, ModelPlanner
 from runtime import (
     AdbDeviceEnv,
@@ -38,12 +37,6 @@ from runtime import (
     RunRecorder,
     Runner,
     TaskRunner,
-)
-
-
-_OPENAI_MISSING_MESSAGE = (
-    "OpenAI SDK is not installed. Install project dependencies with "
-    "`pip install -r requirements.txt` or install `openai` directly."
 )
 
 
@@ -324,22 +317,25 @@ def check_model_api(base_url: str, model_name: str, api_key: str = "EMPTY") -> b
     # Check 1: Network connectivity using chat API
     print(f"1. Checking API connectivity ({base_url})...", end=" ")
     try:
-        from openai import OpenAI
-
-        # Create OpenAI client
-        client = OpenAI(base_url=base_url, api_key=api_key, timeout=30.0)
+        client = OpenAICompatibleHTTPClient(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=30.0,
+        )
 
         # Use chat completion to test connectivity (more universally supported than /models)
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": "Hi"}],
-            max_tokens=5,
-            temperature=0.0,
+        response = client.create_chat_completion(
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 5,
+                "temperature": 0.0,
+            },
             stream=False,
         )
 
         # Check if we got a valid response
-        if response.choices and len(response.choices) > 0:
+        if response.get("choices"):
             print("✅ OK")
         else:
             print("❌ FAILED")
@@ -351,9 +347,7 @@ def check_model_api(base_url: str, model_name: str, api_key: str = "EMPTY") -> b
         error_msg = str(e)
 
         # Provide more specific error messages
-        if isinstance(e, ModuleNotFoundError) and e.name == "openai":
-            print(f"   Error: {_OPENAI_MISSING_MESSAGE}")
-        elif "Connection refused" in error_msg or "Connection error" in error_msg:
+        if "Connection refused" in error_msg or "Connection error" in error_msg:
             print(f"   Error: Cannot connect to {base_url}")
             print("   Solution:")
             print("     1. Check if the model server is running")

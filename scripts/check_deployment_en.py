@@ -1,8 +1,12 @@
 import argparse
 import json
 import os
+import sys
+from pathlib import Path
 
-from openai import OpenAI
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from phone_agent.model import OpenAICompatibleHTTPClient
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -89,31 +93,34 @@ Usage examples:
     print("=" * 80)
 
     try:
-        client = OpenAI(
+        client = OpenAICompatibleHTTPClient(
             base_url=base_url,
             api_key=api_key,
         )
 
-        response = client.chat.completions.create(
-            messages=messages,
-            model=model,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            frequency_penalty=args.frequency_penalty,
+        response = client.create_chat_completion(
+            {
+                "messages": messages,
+                "model": model,
+                "max_tokens": args.max_tokens,
+                "temperature": args.temperature,
+                "top_p": args.top_p,
+                "frequency_penalty": args.frequency_penalty,
+            },
             stream=False,
         )
 
         print("\nModel inference result:")
         print("=" * 80)
-        print(response.choices[0].message.content)
+        print(response["choices"][0]["message"]["content"])
         print("=" * 80)
 
-        if response.usage:
+        if response.get("usage"):
+            usage = response["usage"]
             print(f"\nStatistics:")
-            print(f"  - Prompt tokens: {response.usage.prompt_tokens}")
-            print(f"  - Completion tokens: {response.usage.completion_tokens}")
-            print(f"  - Total tokens: {response.usage.total_tokens}")
+            print(f"  - Prompt tokens: {usage.get('prompt_tokens')}")
+            print(f"  - Completion tokens: {usage.get('completion_tokens')}")
+            print(f"  - Total tokens: {usage.get('total_tokens')}")
 
         print(
             f"\nPlease evaluate the above inference result to determine if the model deployment meets expectations."

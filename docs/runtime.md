@@ -19,6 +19,23 @@ python main.py \
 Task recording is enabled by default. Use `--runs-dir PATH` to choose another
 location or `--no-record` to disable it.
 
+## Model service
+
+`--base-url` is the configurable model service address. It should point at an
+OpenAI-compatible service root, for example a local AutoGLM deployment exposed
+by vLLM or SGLang:
+
+```bash
+python main.py \
+  --base-url http://localhost:8000/v1 \
+  --model autoglm-phone-9b \
+  "open settings"
+```
+
+The core client talks to `/chat/completions` over HTTP/SSE directly and does not
+require the OpenAI Python SDK. For local dogfood, start AutoGLM with a compatible
+server and keep `--base-url` pointed at that local endpoint.
+
 Each task creates:
 
 ```text

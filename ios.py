@@ -18,13 +18,10 @@ import os
 import shutil
 import subprocess
 import sys
-from urllib.parse import urlparse
-
-from openai import OpenAI
 
 from phone_agent.agent_ios import IOSAgentConfig, IOSPhoneAgent
 from phone_agent.config.apps_ios import list_supported_apps
-from phone_agent.model import ModelConfig
+from phone_agent.model import ModelConfig, OpenAICompatibleHTTPClient
 from phone_agent.xctest import XCTestConnection, list_devices
 
 
@@ -182,15 +179,19 @@ def check_model_api(base_url: str, api_key: str, model_name: str) -> bool:
     # Check 1: Network connectivity
     print(f"1. Checking API connectivity ({base_url})...", end=" ")
     try:
-        # Parse the URL to get host and port
-        parsed = urlparse(base_url)
-
-        # Create OpenAI client
-        client = OpenAI(base_url=base_url, api_key=api_key, timeout=10.0)
+        client = OpenAICompatibleHTTPClient(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=10.0,
+        )
 
         # Try to list models (this tests connectivity)
-        models_response = client.models.list()
-        available_models = [model.id for model in models_response.data]
+        models_response = client.list_models()
+        available_models = [
+            model.get("id")
+            for model in models_response.get("data", [])
+            if isinstance(model, dict)
+        ]
 
         print("✅ OK")
 

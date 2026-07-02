@@ -1,22 +1,25 @@
-"""Model client for AI inference using OpenAI-compatible API."""
+"""Model client for OpenAI-compatible local or remote inference services."""
+
+from __future__ import annotations
 
 import json
+import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
 from phone_agent.config.i18n import get_message
 
 
-_OPENAI_MISSING_MESSAGE = (
-    "OpenAI SDK is not installed. Install project dependencies with "
-    "`pip install -r requirements.txt` or install `openai` directly."
-)
+class ModelServiceError(RuntimeError):
+    """Raised when an OpenAI-compatible model service request fails."""
 
 
 @dataclass
 class ModelConfig:
-    """Configuration for the AI model."""
+    """Configuration for the AI model service."""
 
     base_url: str = "http://localhost:8000/v1"
     api_key: str = "EMPTY"
@@ -26,6 +29,7 @@ class ModelConfig:
     top_p: float = 0.85
     frequency_penalty: float = 0.2
     extra_body: dict[str, Any] = field(default_factory=dict)
+    request_timeout: float = 30.0
     lang: str = "cn"  # Language for UI messages: 'cn' or 'en'
 
 
@@ -43,140 +47,84 @@ class ModelResponse:
 
 
 class ModelClient:
-    """
-    Client for interacting with OpenAI-compatible vision-language models.
-
-    Args:
-        config: Model configuration.
-    """
+    """Client for OpenAI-compatible vision-language model services."""
 
     def __init__(self, config: ModelConfig | None = None):
         self.config = config or ModelConfig()
-        openai_cls, import_error = _load_openai_client_class()
-        self._openai_import_error = import_error
-        self.client = (
-            openai_cls(base_url=self.config.base_url, api_key=self.config.api_key)
-            if openai_cls is not None
-            else None
+        self.client = OpenAICompatibleHTTPClient(
+            base_url=self.config.base_url,
+            api_key=self.config.api_key,
+            timeout=self.config.request_timeout,
         )
 
     def request(self, messages: list[dict[str, Any]]) -> ModelResponse:
-        """
-        Send a request to the model.
-
-        Args:
-            messages: List of message dictionaries in OpenAI format.
-
-        Returns:
-            ModelResponse containing thinking and action.
-
-        Raises:
-            ValueError: If the response cannot be parsed.
-        """
-        if self.client is None:
-            raise RuntimeError(_OPENAI_MISSING_MESSAGE) from self._openai_import_error
-
-        # Start timing
+        """Send a streaming request to the model and parse its action output."""
         start_time = time.time()
         time_to_first_token = None
         time_to_thinking_end = None
 
-        stream = self.client.chat.completions.create(
-            messages=messages,
-            model=self.config.model_name,
-            max_tokens=self.config.max_tokens,
-            temperature=self.config.temperature,
-            top_p=self.config.top_p,
-            frequency_penalty=self.config.frequency_penalty,
-            extra_body=self.config.extra_body,
+        stream = self.client.create_chat_completion(
+            {
+                "messages": messages,
+                "model": self.config.model_name,
+                "max_tokens": self.config.max_tokens,
+                "temperature": self.config.temperature,
+                "top_p": self.config.top_p,
+                "frequency_penalty": self.config.frequency_penalty,
+                **self.config.extra_body,
+            },
             stream=True,
         )
 
         raw_content = ""
-        buffer = ""  # Buffer to hold content that might be part of a marker
+        buffer = ""
         action_markers = ["finish(message=", "do(action="]
-        in_action_phase = False  # Track if we've entered the action phase
+        in_action_phase = False
         first_token_received = False
 
-        for chunk in stream:
-            if len(chunk.choices) == 0:
+        for content in stream:
+            raw_content += content
+
+            if not first_token_received:
+                time_to_first_token = time.time() - start_time
+                first_token_received = True
+
+            if in_action_phase:
                 continue
-            if chunk.choices[0].delta.content is not None:
-                content = chunk.choices[0].delta.content
-                raw_content += content
 
-                # Record time to first token
-                if not first_token_received:
-                    time_to_first_token = time.time() - start_time
-                    first_token_received = True
+            buffer += content
 
-                if in_action_phase:
-                    # Already in action phase, just accumulate content without printing
-                    continue
+            marker_found = False
+            for marker in action_markers:
+                if marker in buffer:
+                    thinking_part = buffer.split(marker, 1)[0]
+                    _console_print(thinking_part, end="", flush=True)
+                    _console_print()
+                    in_action_phase = True
+                    marker_found = True
+                    if time_to_thinking_end is None:
+                        time_to_thinking_end = time.time() - start_time
+                    break
 
-                buffer += content
+            if marker_found:
+                continue
 
-                # Check if any marker is fully present in buffer
-                marker_found = False
-                for marker in action_markers:
-                    if marker in buffer:
-                        # Marker found, print everything before it
-                        thinking_part = buffer.split(marker, 1)[0]
-                        print(thinking_part, end="", flush=True)
-                        print()  # Print newline after thinking is complete
-                        in_action_phase = True
-                        marker_found = True
-
-                        # Record time to thinking end
-                        if time_to_thinking_end is None:
-                            time_to_thinking_end = time.time() - start_time
-
+            is_potential_marker = False
+            for marker in action_markers:
+                for i in range(1, len(marker)):
+                    if buffer.endswith(marker[:i]):
+                        is_potential_marker = True
                         break
+                if is_potential_marker:
+                    break
 
-                if marker_found:
-                    continue  # Continue to collect remaining content
+            if not is_potential_marker:
+                _console_print(buffer, end="", flush=True)
+                buffer = ""
 
-                # Check if buffer ends with a prefix of any marker
-                # If so, don't print yet (wait for more content)
-                is_potential_marker = False
-                for marker in action_markers:
-                    for i in range(1, len(marker)):
-                        if buffer.endswith(marker[:i]):
-                            is_potential_marker = True
-                            break
-                    if is_potential_marker:
-                        break
-
-                if not is_potential_marker:
-                    # Safe to print the buffer
-                    print(buffer, end="", flush=True)
-                    buffer = ""
-
-        # Calculate total time
         total_time = time.time() - start_time
-
-        # Parse thinking and action from response
         thinking, action = self._parse_response(raw_content)
-
-        # Print performance metrics
-        lang = self.config.lang
-        print()
-        print("=" * 50)
-        print(f"⏱️  {get_message('performance_metrics', lang)}:")
-        print("-" * 50)
-        if time_to_first_token is not None:
-            print(
-                f"{get_message('time_to_first_token', lang)}: {time_to_first_token:.3f}s"
-            )
-        if time_to_thinking_end is not None:
-            print(
-                f"{get_message('time_to_thinking_end', lang)}:        {time_to_thinking_end:.3f}s"
-            )
-        print(
-            f"{get_message('total_inference_time', lang)}:          {total_time:.3f}s"
-        )
-        print("=" * 50)
-
+        self._print_metrics(time_to_first_token, time_to_thinking_end, total_time)
         return ModelResponse(
             thinking=thinking,
             action=action,
@@ -185,6 +133,30 @@ class ModelClient:
             time_to_thinking_end=time_to_thinking_end,
             total_time=total_time,
         )
+
+    def _print_metrics(
+        self,
+        time_to_first_token: float | None,
+        time_to_thinking_end: float | None,
+        total_time: float,
+    ) -> None:
+        lang = self.config.lang
+        _console_print()
+        _console_print("=" * 50)
+        _console_print(f"{get_message('performance_metrics', lang)}:")
+        _console_print("-" * 50)
+        if time_to_first_token is not None:
+            _console_print(
+                f"{get_message('time_to_first_token', lang)}: {time_to_first_token:.3f}s"
+            )
+        if time_to_thinking_end is not None:
+            _console_print(
+                f"{get_message('time_to_thinking_end', lang)}:        {time_to_thinking_end:.3f}s"
+            )
+        _console_print(
+            f"{get_message('total_inference_time', lang)}:          {total_time:.3f}s"
+        )
+        _console_print("=" * 50)
 
     def _parse_response(self, content: str) -> tuple[str, str]:
         """
@@ -197,36 +169,125 @@ class ModelClient:
            everything before is thinking, everything from 'do(action=' onwards is action.
         3. Fallback: If content contains '<answer>', use legacy parsing with XML tags.
         4. Otherwise, return empty thinking and full content as action.
-
-        Args:
-            content: Raw response content.
-
-        Returns:
-            Tuple of (thinking, action).
         """
-        # Rule 1: Check for finish(message=
         if "finish(message=" in content:
             parts = content.split("finish(message=", 1)
             thinking = parts[0].strip()
             action = "finish(message=" + parts[1]
             return thinking, action
 
-        # Rule 2: Check for do(action=
         if "do(action=" in content:
             parts = content.split("do(action=", 1)
             thinking = parts[0].strip()
             action = "do(action=" + parts[1]
             return thinking, action
 
-        # Rule 3: Fallback to legacy XML tag parsing
         if "<answer>" in content:
             parts = content.split("<answer>", 1)
             thinking = parts[0].replace("<think>", "").replace("</think>", "").strip()
             action = parts[1].replace("</answer>", "").strip()
             return thinking, action
 
-        # Rule 4: No markers found, return content as action
         return "", content
+
+
+class OpenAICompatibleHTTPClient:
+    """Tiny OpenAI-compatible HTTP client using only the standard library."""
+
+    def __init__(self, base_url: str, api_key: str = "EMPTY", timeout: float = 30.0):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def create_chat_completion(
+        self,
+        payload: dict[str, Any],
+        *,
+        stream: bool,
+    ):
+        request_payload = dict(payload)
+        request_payload["stream"] = stream
+        if stream:
+            return self._stream_chat_completion(request_payload)
+        return self._request_json("chat/completions", request_payload, method="POST")
+
+    def list_models(self) -> dict[str, Any]:
+        return self._request_json("models", method="GET")
+
+    def _stream_chat_completion(self, payload: dict[str, Any]):
+        with self._open(
+            "chat/completions",
+            method="POST",
+            payload=payload,
+            accept="text/event-stream",
+        ) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8").strip()
+                if not line or line.startswith(":"):
+                    continue
+                data = line[5:].strip() if line.startswith("data:") else line
+                if data == "[DONE]":
+                    break
+                event = _loads_json(data, "stream event")
+                content = _extract_stream_content(event)
+                if content:
+                    yield content
+
+    def _request_json(
+        self,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        method: str,
+    ) -> dict[str, Any]:
+        with self._open(path, method=method, payload=payload) as response:
+            text = response.read().decode("utf-8")
+        return _loads_json(text, "response body")
+
+    def _open(
+        self,
+        path: str,
+        *,
+        method: str,
+        payload: dict[str, Any] | None = None,
+        accept: str = "application/json",
+    ):
+        body = (
+            json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            if payload is not None
+            else None
+        )
+        headers = {
+            "Accept": accept,
+            "Content-Type": "application/json",
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        request = urllib.request.Request(
+            _join_url(self.base_url, path),
+            data=body,
+            headers=headers,
+            method=method,
+        )
+        try:
+            return urllib.request.urlopen(request, timeout=self.timeout)
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            finally:
+                exc.close()
+            raise ModelServiceError(
+                f"Model service HTTP {exc.code} at {request.full_url}: {detail}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise ModelServiceError(
+                f"Model service request failed at {request.full_url}: {exc.reason}"
+            ) from exc
+        except TimeoutError as exc:
+            raise ModelServiceError(
+                f"Model service request timed out at {request.full_url}"
+            ) from exc
 
 
 class MessageBuilder:
@@ -303,11 +364,51 @@ class MessageBuilder:
         return json.dumps(info, ensure_ascii=False)
 
 
-def _load_openai_client_class():
+def _extract_stream_content(event: dict[str, Any]) -> str | None:
+    choices = event.get("choices") or []
+    if not choices:
+        return None
+    choice = choices[0]
+    delta = choice.get("delta")
+    if isinstance(delta, dict) and delta.get("content") is not None:
+        return str(delta["content"])
+    message = choice.get("message")
+    if isinstance(message, dict) and message.get("content") is not None:
+        return str(message["content"])
+    text = choice.get("text")
+    return str(text) if text is not None else None
+
+
+def _loads_json(text: str, label: str) -> dict[str, Any]:
     try:
-        from openai import OpenAI
-    except ModuleNotFoundError as exc:
-        if exc.name == "openai":
-            return None, exc
-        raise
-    return OpenAI, None
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ModelServiceError(f"Invalid JSON in model service {label}: {text}") from exc
+    if not isinstance(payload, dict):
+        raise ModelServiceError(f"Unexpected model service {label}: {payload!r}")
+    return payload
+
+
+def _join_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _console_print(*args, **kwargs) -> None:
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        file = kwargs.get("file") or sys.stdout
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        text = sep.join(str(arg) for arg in args) + end
+        encoding = getattr(file, "encoding", None) or "utf-8"
+        if hasattr(file, "buffer"):
+            file.buffer.write(text.encode(encoding, errors="replace"))
+            if kwargs.get("flush", False):
+                file.flush()
+        else:
+            file.write(
+                text.encode(encoding, errors="replace").decode(
+                    encoding, errors="replace"
+                )
+            )
