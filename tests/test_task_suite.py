@@ -7,8 +7,8 @@ import unittest
 from runtime import (
     Action,
     ActionType,
+    JudgeRef,
     RunStatus,
-    StateJudge,
     TaskCase,
     VerifiableTask,
     make_sim_smoke_cases,
@@ -36,10 +36,13 @@ class SimSmokeSuiteTests(unittest.TestCase):
             id="sim.bad_expected_app",
             task=VerifiableTask(
                 description="open wrong app",
+                judge_ref=JudgeRef(
+                    judge_type="state",
+                    config={"expected_state": {"current_app": "Settings"}},
+                ),
                 setup={"current_app": "home"},
                 max_steps=5,
             ),
-            judge=StateJudge({"current_app": "Settings"}),
             metadata={
                 "script": [
                     Action(type=ActionType.LAUNCH_APP, app="Browser"),
@@ -65,7 +68,8 @@ class SimSmokeSuiteTests(unittest.TestCase):
 
         self.assertTrue(all(isinstance(case.task, VerifiableTask) for case in cases))
         self.assertTrue(all(case.task.max_steps is not None for case in cases))
-        self.assertTrue(all(case.judge is not None for case in cases))
+        self.assertTrue(all(case.judge is None for case in cases))
+        self.assertTrue(all(case.task.judge_ref is not None for case in cases))
 
     def test_suite_report_dict_is_json_serializable(self):
         result = run_sim_smoke_suite()

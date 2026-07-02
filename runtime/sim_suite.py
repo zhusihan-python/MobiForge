@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from runtime.boundary import AgentAdapter
-from runtime.judges import StateJudge
-from runtime.schemas import Action, ActionType, Observation, VerifiableTask
+from runtime.schemas import Action, ActionType, JudgeRef, Observation, VerifiableTask
 from runtime.sim_backends import SimulatedDeviceEnv
 from runtime.task_suite import TaskCase, TaskSuiteResult, TaskSuiteRunner
 
@@ -48,11 +47,14 @@ def make_sim_smoke_cases() -> list[TaskCase]:
             id="sim.open_settings",
             task=VerifiableTask(
                 description="open settings in simulator",
+                judge_ref=JudgeRef(
+                    judge_type="state",
+                    config={"expected_state": {"current_app": "Settings"}},
+                ),
                 setup={"current_app": "home"},
                 goal="current_app is Settings",
                 max_steps=5,
             ),
-            judge=StateJudge({"current_app": "Settings"}),
             tags=("sim", "launch"),
             metadata={
                 "script": [
@@ -65,11 +67,19 @@ def make_sim_smoke_cases() -> list[TaskCase]:
             id="sim.type_note",
             task=VerifiableTask(
                 description="type text into notes in simulator",
+                judge_ref=JudgeRef(
+                    judge_type="state",
+                    config={
+                        "expected_state": {
+                            "current_app": "Notes",
+                            "text_input": "hello",
+                        }
+                    },
+                ),
                 setup={"current_app": "home"},
                 goal="Notes is open and text_input is hello",
                 max_steps=5,
             ),
-            judge=StateJudge({"current_app": "Notes", "text_input": "hello"}),
             tags=("sim", "input"),
             metadata={
                 "script": [
@@ -83,11 +93,14 @@ def make_sim_smoke_cases() -> list[TaskCase]:
             id="sim.back_navigation",
             task=VerifiableTask(
                 description="navigate back from browser to settings in simulator",
+                judge_ref=JudgeRef(
+                    judge_type="state",
+                    config={"expected_state": {"current_app": "Settings"}},
+                ),
                 setup={"current_app": "home"},
                 goal="back returns from Browser to Settings",
                 max_steps=6,
             ),
-            judge=StateJudge({"current_app": "Settings"}),
             tags=("sim", "navigation"),
             metadata={
                 "script": [

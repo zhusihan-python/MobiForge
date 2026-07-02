@@ -231,8 +231,8 @@ class JudgeRef:
     """Serializable reference to a judge, resolved by a ``JudgeRegistry``.
 
     No ``Callable`` lives in a serialized task spec; the registry returns the
-    real ``Judge`` at run time. Phase 1 passes ``Judge`` instances directly and
-    does not yet need the registry.
+    real ``Judge`` at run time. Callers may still pass concrete ``Judge``
+    instances directly when task specs are constructed in process.
     """
 
     judge_type: JudgeType

@@ -20,6 +20,12 @@ from runtime.boundary import (
     RunResult,
     TrajectoryStore,
 )
+from runtime.judge_registry import (
+    DEFAULT_JUDGE_REGISTRY,
+    JudgeRegistry,
+    build_default_judge_registry,
+    resolve_task_judge,
+)
 from runtime.run_recorder import RunRecorder
 from runtime.schemas import (
     Action,
@@ -80,8 +86,10 @@ __all__ = [
     "DiskTrajectoryStore",
     "EnvResult",
     "FreeformTask",
+    "DEFAULT_JUDGE_REGISTRY",
     "JudgeRef",
     "JudgeResult",
+    "JudgeRegistry",
     "Observation",
     "ResumePoint",
     "RunStatus",
@@ -96,7 +104,9 @@ __all__ = [
     "TaskSuiteResult",
     "TaskSuiteRunner",
     "VerifiableTask",
+    "build_default_judge_registry",
     "make_sim_smoke_cases",
+    "resolve_task_judge",
     "run_sim_smoke_suite",
 ]
 

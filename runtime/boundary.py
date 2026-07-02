@@ -11,8 +11,9 @@ backend-agnostic with fake implementations; Gate B (next batch) threads a real
 ``PhoneAgent.step()``-derived adapter and an ADB backend through the same
 ``Runner``.
 
-Phase 1 passes concrete ``Judge`` instances; the serialized ``JudgeRef`` +
-``JudgeRegistry`` indirection is deferred until task specs need to be persisted.
+Task suites can resolve serialized ``JudgeRef`` values through ``JudgeRegistry``;
+callers that build tasks in process may still pass concrete ``Judge`` instances
+directly to the runner.
 """
 
 from __future__ import annotations

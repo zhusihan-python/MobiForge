@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 from runtime.boundary import AgentAdapter, EnvBackend, Judge, Runner, RunResult
+from runtime.judge_registry import JudgeRegistry, resolve_task_judge
 from runtime.schemas import RunStatus, TaskSpec
 
 
@@ -184,11 +185,13 @@ class TaskSuiteRunner:
         *,
         adapter_factory: Callable[[TaskCase], AgentAdapter],
         backend_factory: Callable[[TaskCase], EnvBackend],
+        judge_registry: Optional[JudgeRegistry] = None,
         max_steps: int = 100,
         timeout_seconds: Optional[float] = None,
     ) -> None:
         self.adapter_factory = adapter_factory
         self.backend_factory = backend_factory
+        self.judge_registry = judge_registry
         self.max_steps = max_steps
         self.timeout_seconds = timeout_seconds
 
@@ -199,7 +202,7 @@ class TaskSuiteRunner:
         result = Runner(
             self.adapter_factory(case),
             self.backend_factory(case),
-            judge=case.judge,
+            judge=case.judge or resolve_task_judge(case.task, self.judge_registry),
             max_steps=self.max_steps,
             timeout_seconds=self.timeout_seconds,
         ).run(case.task)

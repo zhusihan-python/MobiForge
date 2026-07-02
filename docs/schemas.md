@@ -216,17 +216,18 @@ TaskSpec = Union[FreeformTask, VerifiableTask]
 - `answer_schema` adopts MobileGym's AnswerSheet: for query tasks the agent
   submits structured answers instead of free text, avoiding string-match failure.
 
-**Registry contract (Phase 1 must define):**
+**Registry contract (implemented in `runtime/judge_registry.py`):**
 
 ```python
 class JudgeRegistry:
-    def register(self, entrypoint: str,
-                 fn: Callable[[Observation, TaskContext], JudgeResult]) -> None: ...
-    def resolve(self, ref: JudgeRef) -> Callable[[Observation, TaskContext], JudgeResult]: ...
+    def register(self, entrypoint: str, factory: Callable[[JudgeRef], Judge]) -> None: ...
+    def resolve(self, ref: JudgeRef) -> Judge: ...
 ```
 
-Built-in judges (`none`, simple `rule`) ship in core; task-specific `state`
-judges are registered by the task suite or by the `mobilegym` backend adapter.
+Built-in `none` and `state` judges ship in core. The default `state` resolver
+expects `JudgeRef.config["expected_state"]` and returns `StateJudge`. `rule` and
+`vlm` judges must provide an explicit `entrypoint` registered by the task suite
+or backend adapter.
 
 ---
 
