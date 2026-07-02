@@ -37,6 +37,7 @@ from phone_agent.xctest import XCTestConnection
 from phone_agent.xctest import list_devices as list_ios_devices
 from runtime import (
     AdbDeviceEnv,
+    DiskTrajectoryStore,
     FreeformTask,
     OpenAutoGLMAdapter,
     RunRecorder,
@@ -894,7 +895,7 @@ def main():
                 print(f"\nError: {e}\n")
 
 
-def _build_new_runner(model_config, agent_config, device_id, timeout_seconds):
+def _build_new_runner(model_config, agent_config, device_id, timeout_seconds, store=None):
     """Construct the boundary-aware Runner for the new runtime path.
 
     No device actions or model requests are performed here (it only wires
@@ -921,6 +922,7 @@ def _build_new_runner(model_config, agent_config, device_id, timeout_seconds):
     return Runner(
         adapter,
         backend,
+        store=store,
         max_steps=agent_config.max_steps,
         timeout_seconds=timeout_seconds,
     )
@@ -960,11 +962,26 @@ def _run_task_legacy(task, args, agent, agent_config, model_config):
 def _run_task_new(task, args, model_config, agent_config):
     """New runtime path: boundary-aware Runner + OpenAutoGLMAdapter + AdbDeviceEnv.
 
-    Uses InMemoryTrajectoryStore (no disk trace yet), so the Trace: line is
-    omitted. Output fields come from RunResult (note: steps_count, not steps).
+    Uses DiskTrajectoryStore unless --no-record is set, restoring the Trace:
+    line while keeping normalized StepResult payloads. Output fields come from
+    RunResult (note: steps_count, not steps).
     """
+    store = None
+    if not args.no_record:
+        store = DiskTrajectoryStore(
+            args.runs_dir,
+            metadata={
+                "runtime": "new",
+                "device_type": args.device_type,
+                "device_id": agent_config.device_id,
+                "model": model_config.model_name,
+                "base_url": model_config.base_url,
+                "max_steps": agent_config.max_steps,
+                "language": agent_config.lang,
+            },
+        )
     runner = _build_new_runner(
-        model_config, agent_config, agent_config.device_id, args.timeout
+        model_config, agent_config, agent_config.device_id, args.timeout, store=store
     )
     result = runner.run(
         FreeformTask(
@@ -977,6 +994,8 @@ def _run_task_new(task, args, model_config, agent_config):
     print(f"Status: {result.status.value}")
     print(f"Steps: {result.steps_count}")
     print(f"Duration: {result.duration_ms} ms")
+    if store is not None and store.run_dir:
+        print(f"Trace: {store.run_dir}")
     return result
 
 

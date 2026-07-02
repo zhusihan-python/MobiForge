@@ -165,12 +165,12 @@ class LegacyOutputTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 7. new path has no Trace: line
+# 7. new path restores Trace: unless --no-record is set
 # ---------------------------------------------------------------------------
 
 
 class NewOutputTests(unittest.TestCase):
-    def test_new_path_output_has_no_trace_line(self):
+    def test_new_path_output_prints_trace_line_and_passes_store_to_runner(self):
         from runtime.schemas import RunStatus
         from runtime.boundary import RunResult
 
@@ -181,15 +181,39 @@ class NewOutputTests(unittest.TestCase):
         args = _args(runtime="new")
         buf = io.StringIO()
         with redirect_stdout(buf), \
+             patch.object(main_mod, "DiskTrajectoryStore") as Store, \
              patch.object(main_mod, "_build_new_runner") as builder:
             builder.return_value.run.return_value = result
+            Store.return_value.run_dir = "runs/new-trace"
             main_mod._run_task_new("task", args, _model_config(), _agent_config())
 
         out = buf.getvalue()
         self.assertIn("Result: done", out)
         self.assertIn("Status: succeeded", out)
         self.assertIn("Steps: 2", out)  # new path uses steps_count
-        self.assertNotIn("Trace:", out)  # new path: no disk store, no Trace:
+        self.assertIn("Trace: runs/new-trace", out)
+        self.assertIs(builder.call_args.args[4], Store.return_value)
+
+    def test_new_path_no_record_suppresses_trace_line(self):
+        from runtime.schemas import RunStatus
+        from runtime.boundary import RunResult
+
+        result = RunResult(
+            status=RunStatus.SUCCEEDED, message="done", steps_count=2,
+            duration_ms=500, steps=[],
+        )
+        args = _args(runtime="new", no_record=True)
+        buf = io.StringIO()
+        with redirect_stdout(buf), \
+             patch.object(main_mod, "DiskTrajectoryStore") as Store, \
+             patch.object(main_mod, "_build_new_runner") as builder:
+            builder.return_value.run.return_value = result
+            main_mod._run_task_new("task", args, _model_config(), _agent_config())
+
+        out = buf.getvalue()
+        self.assertNotIn("Trace:", out)
+        self.assertFalse(Store.called)
+        self.assertIsNone(builder.call_args.args[4])
 
 
 if __name__ == "__main__":

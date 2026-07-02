@@ -44,6 +44,7 @@ from runtime.task_suite import (
     TaskSuiteResult,
     TaskSuiteRunner,
 )
+from runtime.trajectory_store import DiskTrajectoryStore
 
 _LAZY_EXPORTS = {
     "AdbDeviceEnv": ("runtime.env_backends", "AdbDeviceEnv"),
@@ -76,6 +77,7 @@ __all__ = [
     "Action",
     "ActionType",
     "DeviceMeta",
+    "DiskTrajectoryStore",
     "EnvResult",
     "FreeformTask",
     "JudgeRef",

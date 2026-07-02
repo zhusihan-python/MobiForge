@@ -2,8 +2,7 @@
 
 > Pre-flight checklist for validating the Phase 2 `--runtime new` path on a real
 > Android device. This is the prerequisite for flipping the default (ADR step 4).
-> Run it before writing the disk `TrajectoryStore` — execution-layer bugs must be
-> isolated from recording-layer ones.
+> Run it to validate the disk `TrajectoryStore` and execution layer together.
 
 > TODO: Real-device validation is currently blocked because no ADB phone/emulator
 > is available in the working environment. Keep this checklist open and run it
@@ -51,7 +50,8 @@ Status: succeeded      # lowercase — the new RunStatus (legacy prints SUCCEEDE
 Steps: <count>
 Duration: <ms>
 ```
-- **No `Trace:` line** (new path uses `InMemoryTrajectoryStore`; expected, not a bug).
+- A `Trace:` line points at the normalized run directory, unless `--no-record`
+  is set.
 - A tap visibly happens on screen at the model-chosen location; the screen
   changes; the next observation reflects it.
 
@@ -104,8 +104,7 @@ Paste back, in this order:
 
 ## Known-gaps to NOT report as bugs (this batch)
 
-- No `Trace:` line / no run directory written (disk `TrajectoryStore` is the
-  next batch).
+- No run directory when `--no-record` is explicitly set.
 - `WAITING_USER` / `ResumePoint` printed on takeover — expected new-path
   behavior, legacy doesn't have it.
 - iOS/HDC rejected with a notice — by design (`--runtime new` is ADB-only).
@@ -113,5 +112,4 @@ Paste back, in this order:
 ## After a green smoke
 
 The default flip (ADR step 4) becomes safe to plan: change `--runtime` default
-to `new`, keep `--runtime legacy` behind the flag for one release. Then disk
-`TrajectoryStore` to restore the `Trace:` line.
+to `new`, keep `--runtime legacy` behind the flag for one release.
