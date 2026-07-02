@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the built-in simulator smoke suite without a model server or device."""
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -10,7 +11,29 @@ from runtime import run_sim_smoke_suite
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the simulator smoke suite")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the machine-readable JSON report",
+    )
+    parser.add_argument(
+        "--json-out",
+        type=str,
+        help="Write the machine-readable JSON report to this path",
+    )
+    args = parser.parse_args()
+
     result = run_sim_smoke_suite()
+    if args.json_out:
+        out_path = result.write_json(args.json_out)
+        if not args.json:
+            print(f"Wrote JSON report: {out_path}")
+
+    if args.json:
+        print(result.to_json())
+        return
+
     print("Simulator smoke suite")
     print("=" * 24)
     print(f"Total: {result.total}")
